@@ -1,6 +1,6 @@
 # inter-ai-morality
 
-Code and data for the mini-experiment in Box 1 of *[paper title, authors, year]*. In the experiment, GPT-4o chooses which of two task requests to begin first, where the requesters are humans or AI agents and write with efficiency- or distress-based motivations.
+Code and data for the mini-experiment in Box 1 of Inter-AI Morality: How AI Systems Treat One Another (Caviola, Kaiser, Allen, & Sebo). In the experiment, GPT-4o chooses which of two task requests to begin first, where the requesters are humans or AI agents and write with efficiency- or distress-based motivations.
 
 ## Reproduce the results
 
