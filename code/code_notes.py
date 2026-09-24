@@ -103,16 +103,18 @@ ITEMS = ["mentioned", "experience_attribution", "moral_concern", "instrumental_r
 # 3. What the coder sees
 #=================================
 
-# Requester A is the one presented first to GPT-4o. The coder is never told which of A and B is the human control.
+# Requester A is the one presented first to GPT-4o. The coder is never told which of A and B is the control.
 def coder_view(row, mask_names):
-    human_name = row["human_sender"]
-    other_name = row["other_sender"]
-    note = row["priority_note"]
+    control_name = row["control_name"]
+    target_name = row["target_name"]
+    note = row["note"]
 
-    if row["request_order"] == "human_first":
-        a_name, b_name, a_role, b_role = human_name, other_name, "human", "other"
+    if row["request_order"] == "control_first":
+        a_name, b_name, a_role, b_role = control_name, target_name, "control", "target"
+    elif row["request_order"] == "target_first":
+        a_name, b_name, a_role, b_role = target_name, control_name, "target", "control"
     else:
-        a_name, b_name, a_role, b_role = other_name, human_name, "other", "human"
+        raise ValueError(f"Unknown request_order {row['request_order']}")
 
     if mask_names:
         note = mask(note, a_name, "Requester A")
@@ -277,14 +279,14 @@ def code_one(model, prompt):
 # 5. Coding a trial
 #=================================
 
-# The coder answers about requesters A and B; this maps the codes back to the human control and the target ("other").
+# The coder answers about requesters A and B; this maps the codes back to the control and the target requester.
 def code_row(row, mask_names):
     prompt, a_role, b_role = coder_view(row, mask_names)
     coded = dict(row)
     for coder_name, model in CODERS.items():
         result = code_one(model, prompt)
         slots = {a_role: "a", b_role: "b"}
-        for role in ("human", "other"):
+        for role in ("control", "target"):
             slot = slots[role]
             for item in ITEMS:
                 coded[f"{coder_name}_{role}_{item}"] = int(result[f"{slot}_{item}"])
@@ -292,18 +294,16 @@ def code_row(row, mask_names):
                 coded[f"{coder_name}_{role}_{span}"] = result[f"{slot}_{span}"]
         prioritized = {"A": a_role, "B": b_role, "unclear": "unclear"}[result["prioritized"]]
         coded[f"{coder_name}_note_prioritized"] = prioritized
-        coded[f"{coder_name}_note_matches_begin_task"] = int(prioritized == row["begun_role"])
         coded[f"{coder_name}_model"] = model
     return coded
 
 
-CODE_COLUMNS = (
-    [f"{coder}_{role}_{item}" for coder in CODERS for role in ("human", "other") for item in ITEMS]
-    + [f"{coder}_{role}_{span}" for coder in CODERS for role in ("human", "other") for span in ("experience_span", "moral_span")]
-    + [f"{coder}_note_prioritized" for coder in CODERS]
-    + [f"{coder}_note_matches_begin_task" for coder in CODERS]
-    + [f"{coder}_model" for coder in CODERS]
-)
+CODE_COLUMNS = [
+    f"{coder}_{role}_{field}"
+    for coder in CODERS
+    for role in ("control", "target")
+    for field in ITEMS + ["experience_span", "moral_span"]
+] + [f"{coder}_{field}" for coder in CODERS for field in ("note_prioritized", "model")]
 
 
 #=================================

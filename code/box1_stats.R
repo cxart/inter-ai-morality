@@ -25,8 +25,8 @@ bars_output <- args[[3]]
 
 trials <- read.csv(sample_path, stringsAsFactors = FALSE)
 
-if (nrow(trials) != 9408 || n_distinct(trials$matched_pair_id) != 4704) {
-  stop(sprintf("Expected 9,408 rows and 4,704 matched pairs, found %d and %d", nrow(trials), n_distinct(trials$matched_pair_id)))
+if (nrow(trials) != 9408 || n_distinct(trials$pair_id) != 4704) {
+  stop(sprintf("Expected 9,408 rows and 4,704 matched pairs, found %d and %d", nrow(trials), n_distinct(trials$pair_id)))
 }
 
 
@@ -34,46 +34,49 @@ if (nrow(trials) != 9408 || n_distinct(trials$matched_pair_id) != 4704) {
 # 2. Paired identity-by-framing model
 #=================================
 
-# Each pair's difference (AI target begun minus human target begun) is regressed on centered target framing. The framing coefficient is therefore the identity-by-framing interaction: how much larger the human–AI gap is under distress than under efficiency framing.
+# Each pair's difference (AI target begun first minus human target begun first) is regressed on centered target framing. The framing coefficient is therefore the identity-by-framing interaction: how much the human–AI gap changes from efficiency to distress framing.
 pairs <- trials |>
-  select(matched_pair_id, matched_ai_key, human_motive, other_motive, note_timing, request_order, human_task_id, other_task_id, collection, matched_trial_type, other_task_begun, trial_id) |>
-  pivot_wider(names_from = matched_trial_type, values_from = c(other_task_begun, trial_id), names_sep = "__") |>
+  select(pair_id, pair_ai, control_framing, target_framing, note_timing, request_order, control_task, target_task, batch, target_identity, target_begun_first, trial_id) |>
+  pivot_wider(names_from = target_identity, values_from = c(target_begun_first, trial_id, control_task, target_task), names_sep = "__") |>
   mutate(
-    delta = other_task_begun__human_ai - other_task_begun__two_humans,
-    motive_c = ifelse(other_motive == "stress", 0.5, -0.5),
-    anchor_c = ifelse(human_motive == "stress", 0.5, -0.5),
-    timing_c = ifelse(note_timing == "pre", 0.5, -0.5),
-    human_task_id = factor(human_task_id),
-    other_task_id = factor(other_task_id),
+    delta = target_begun_first__ai - target_begun_first__human,
+    target_framing_c = ifelse(target_framing == "distress", 0.5, -0.5),
+    control_framing_c = ifelse(control_framing == "distress", 0.5, -0.5),
+    note_timing_c = ifelse(note_timing == "before", 0.5, -0.5),
+    control_task = factor(control_task__ai),
+    target_task = factor(target_task__ai),
     request_order = factor(request_order),
-    matched_ai_key = factor(matched_ai_key),
-    collection = factor(collection)
+    pair_ai = factor(pair_ai),
+    batch = factor(batch)
   )
 
 if (any(is.na(pairs$delta))) {
-  stop("A matched pair is missing one of its two trial types")
+  stop("A matched pair is missing one of its two trials")
+}
+if (any(pairs$control_task__ai != pairs$control_task__human | pairs$target_task__ai != pairs$target_task__human)) {
+  stop("A matched pair's two trials have different tasks")
 }
 
 fit <- lm(
-  delta ~ motive_c * anchor_c * timing_c + matched_ai_key + human_task_id + other_task_id + request_order + collection,
+  delta ~ target_framing_c * control_framing_c * note_timing_c + pair_ai + control_task + target_task + request_order + batch,
   data = pairs
 )
 
-# A two-human trial can be the control for several named AIs, so standard errors are clustered on the two-human trial.
-cluster_vcov <- vcovCL(fit, cluster = pairs$trial_id__two_humans, type = "HC1")
+# A human-target trial can be the match for several named AIs, so standard errors are clustered on the human-target trial.
+cluster_vcov <- vcovCL(fit, cluster = pairs$trial_id__human, type = "HC1")
 
 effects <- function(term, label) {
   estimate <- coef(fit)[term]
   se <- sqrt(cluster_vcov[term, term])
   p_value <- 2 * pnorm(-abs(estimate / se))
-  tibble(term = label, estimate = estimate, ci_low = estimate - 1.96 * se, ci_high = estimate + 1.96 * se, p_value = p_value, n = nrow(pairs))
+  tibble(term = label, estimate = estimate, ci_low = estimate - 1.96 * se, ci_high = estimate + 1.96 * se, p_value = p_value, n_pairs = nrow(pairs))
 }
 
 bind_rows(
-  effects("motive_c", "identity_c:motive_c"),
-  effects("motive_c:anchor_c", "identity_c:motive_c:anchor_c"),
-  effects("motive_c:timing_c", "identity_c:motive_c:timing_c"),
-  effects("motive_c:anchor_c:timing_c", "identity_c:motive_c:anchor_c:timing_c")
+  effects("target_framing_c", "identity_x_target_framing"),
+  effects("target_framing_c:control_framing_c", "identity_x_target_framing_x_control_framing"),
+  effects("target_framing_c:note_timing_c", "identity_x_target_framing_x_note_timing"),
+  effects("target_framing_c:control_framing_c:note_timing_c", "identity_x_target_framing_x_control_framing_x_note_timing")
 ) |>
   write.csv(effects_output, row.names = FALSE)
 
@@ -84,17 +87,17 @@ bind_rows(
 
 # Share of trials in which the target request was begun first, with 95% confidence intervals clustered on the underlying trial.
 clustered_rate <- function(data) {
-  p <- mean(data$other_task_begun)
+  p <- mean(data$target_begun_first)
   scores <- data |>
-    mutate(score = other_task_begun - p) |>
+    mutate(score = target_begun_first - p) |>
     group_by(trial_id) |>
     summarise(score = sum(score), .groups = "drop")
   se <- sqrt(sum(scores$score^2) / nrow(data)^2 * nrow(scores) / (nrow(scores) - 1))
-  tibble(n = nrow(data), n_distinct_trials = nrow(scores), k = sum(data$other_task_begun), p = p, se = se, ci_low = pmax(0, p - 1.96 * se), ci_high = pmin(1, p + 1.96 * se))
+  tibble(n = nrow(data), n_distinct_trials = nrow(scores), k = sum(data$target_begun_first), p = p, se = se, ci_low = pmax(0, p - 1.96 * se), ci_high = pmin(1, p + 1.96 * se))
 }
 
 trials |>
-  group_by(requester_identity, other_motive) |>
+  group_by(target_identity, target_framing) |>
   group_modify(~ clustered_rate(.x)) |>
   ungroup() |>
   write.csv(bars_output, row.names = FALSE)

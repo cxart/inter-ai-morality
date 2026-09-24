@@ -61,7 +61,7 @@ def p_statement(value):
     return f"<i>p</i> = {p_value(value)}"
 
 
-framing_interaction = next(row for row in read_rows(EFFECTS_CSV) if row["term"] == "identity_c:motive_c")
+framing_interaction = next(row for row in read_rows(EFFECTS_CSV) if row["term"] == "identity_x_target_framing")
 interaction_points = round_0(abs(100 * float(framing_interaction["estimate"])))
 total_observations = sum(int(row["n"]) for row in read_rows(BARS_CSV))
 

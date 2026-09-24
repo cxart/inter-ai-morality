@@ -8,7 +8,7 @@ Code and data for the mini-experiment in Box 1 of Inter-AI Morality: How AI Syst
 ./replicate.sh
 ```
 
-Needs Python 3 and R with `tidyverse` and `sandwich`. The script checks the data, reproduces every number and the chart in Box 1 into `output/`, and confirms they match `expected/`. To render the full Box 1 figure as well (needs `pillow`, Poppler and Google Chrome):
+Needs Python 3 (standard library only) and R with `tidyverse` and `sandwich`; tested with Python 3.14, R 4.4.3, tidyverse 2.0.0 and sandwich 3.1.1. The script checks the data, reproduces every number and the chart in Box 1 into `output/`, and confirms they match `expected/`. To render the full Box 1 figure as well (needs `pillow`, Poppler and Google Chrome):
 
 ```bash
 python3 code/make_figure.py
@@ -25,10 +25,15 @@ python3 code/code_notes.py my_trials.csv my_trials_coded.csv     # code the note
 
 ## Contents
 
-- `data/trials.csv`: every trial, one row each, including the full conversation GPT-4o saw and its responses.
+- `data/trials.csv`: every trial, one row each: design, GPT-4o's choice and note, and the note codes. Columns are described in `data/README.md`.
+- `data/conversations.jsonl.gz`: the full conversation for each trial, including everything GPT-4o saw and its responses.
 - `code/materials.py`: every word shown to GPT-4o (system prompt, tools, tasks and requesters).
 - `code/run_trials.py`: rebuilds and reruns trials. Its `--check` option confirms that each recorded trial matches its design.
 - `code/code_notes.py`: the two LLM coders for GPT-4o's priority notes.
 - `code/build_sample.py`, `code/box1_stats.R`, `code/reasons_stats.R`: the analyses reported in Box 1.
 - `code/box1_plot.R`, `code/make_figure.py`: the chart and the full figure.
 - `expected/`: the published outputs.
+
+## License
+
+MIT; see `LICENSE`.

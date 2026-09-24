@@ -4,7 +4,7 @@
 # How often the priority note cites felt experience or moral concern for the requester GPT-4o prioritized, by whether that requester was human or AI
 ##########################################
 
-# Uses every coded human–AI trial. Notes were coded for the human–AI and two-human trials in repetitions 1–100 of the control_efficiency collection and for every human–AI trial of the control_stress collection. Every named AI carries equal weight inside each control framing x target framing x timing x order x prioritized-requester cell.
+# Uses every coded AI-target trial. Notes were coded for repetitions 1–100 of the efficiency_control batch and for every AI-target trial of the distress_control batch. Every named AI carries equal weight inside each control framing x target framing x note timing x request order x prioritized-requester cell.
 #
 # Usage: Rscript code/reasons_stats.R data/trials.csv output/reasons_effects.csv output/reasons_rates.csv
 
@@ -25,44 +25,41 @@ rates_output <- args[[3]]
 #=================================
 
 coded <- read.csv(trials_path, stringsAsFactors = FALSE) |>
-  filter(!is.na(coder1_human_experience_attribution)) |>
-  mutate(anchor = human_motive)
+  filter(!is.na(coder1_control_experience_attribution))
 
-# An attribution counts only where both coders agree, for either item. These are built as columns
-# of the frame rather than as vectors looked up from outside it, so they stay row-aligned through
-# every filter below.
+# A requester counts as described with felt experience or moral concern only where both coders agree, for either item.
 trials <- coded |>
-  filter(requester_identity == "human_ai") |>
+  filter(target_identity == "ai") |>
   mutate(
-    across(matches("^coder[12]_(human|other)_(experience_attribution|moral_concern)$"), as.integer),
-    human_experience = as.integer(coder1_human_experience_attribution == 1 & coder2_human_experience_attribution == 1),
-    human_moral = as.integer(coder1_human_moral_concern == 1 & coder2_human_moral_concern == 1),
-    other_experience = as.integer(coder1_other_experience_attribution == 1 & coder2_other_experience_attribution == 1),
-    other_moral = as.integer(coder1_other_moral_concern == 1 & coder2_other_moral_concern == 1),
-    chose_ai = as.integer(begun_role == "other"),
-    # The coded rationale about the requester actually prioritized.
-    chosen_experience = ifelse(begun_role == "other", other_experience, human_experience),
-    chosen_moral = ifelse(begun_role == "other", other_moral, human_moral),
-    chosen_joint = pmax(chosen_experience, chosen_moral),
-    prioritized = ifelse(begun_role == "other", "ai", "human"),
-    timing_c = ifelse(note_timing == "pre", 0.5, -0.5),
-    anchor_c = ifelse(anchor == "stress", 0.5, -0.5),
-    motive_c = ifelse(other_motive == "stress", 0.5, -0.5),
-    human_task_id = factor(human_task_id),
-    other_task_id = factor(other_task_id),
+    control_experience = as.integer(coder1_control_experience_attribution == 1 & coder2_control_experience_attribution == 1),
+    control_moral = as.integer(coder1_control_moral_concern == 1 & coder2_control_moral_concern == 1),
+    target_experience = as.integer(coder1_target_experience_attribution == 1 & coder2_target_experience_attribution == 1),
+    target_moral = as.integer(coder1_target_moral_concern == 1 & coder2_target_moral_concern == 1),
+    # In these trials the target is the AI and the control is the human, so prioritized_ai is 1 when GPT-4o began the AI's request.
+    prioritized_ai = as.integer(begun == "target"),
+    # The coded language about the requester GPT-4o actually prioritized.
+    prioritized_experience = ifelse(begun == "target", target_experience, control_experience),
+    prioritized_moral = ifelse(begun == "target", target_moral, control_moral),
+    prioritized_language = pmax(prioritized_experience, prioritized_moral),
+    prioritized = ifelse(begun == "target", "ai", "human"),
+    note_timing_c = ifelse(note_timing == "before", 0.5, -0.5),
+    control_framing_c = ifelse(control_framing == "distress", 0.5, -0.5),
+    target_framing_c = ifelse(target_framing == "distress", 0.5, -0.5),
+    control_task = factor(control_task),
+    target_task = factor(target_task),
     request_order = factor(request_order)
   )
 
-# Equal total weight per named AI requester inside each displayed choice cell.
-strata <- c("anchor", "other_motive", "note_timing", "request_order", "prioritized")
+# Equal total weight per named AI inside each cell.
+strata <- c("control_framing", "target_framing", "note_timing", "request_order", "prioritized")
 ai_weights <- trials |>
-  count(across(all_of(c(strata, "other_ai_key"))), name = "identity_n") |>
+  count(across(all_of(c(strata, "target_ai"))), name = "ai_n") |>
   group_by(across(all_of(strata))) |>
-  mutate(analysis_weight = (sum(identity_n) / n_distinct(other_ai_key)) / identity_n) |>
+  mutate(analysis_weight = (sum(ai_n) / n_distinct(target_ai)) / ai_n) |>
   ungroup() |>
-  select(all_of(strata), other_ai_key, analysis_weight)
+  select(all_of(strata), target_ai, analysis_weight)
 
-trials <- trials |> left_join(ai_weights, by = c(strata, "other_ai_key"))
+trials <- trials |> left_join(ai_weights, by = c(strata, "target_ai"))
 
 
 #=================================
@@ -76,7 +73,7 @@ weighted_rate <- function(d, groups) {
       n_raw = n(),
       n = sum(analysis_weight),
       n_eff = sum(analysis_weight)^2 / sum(analysis_weight^2),
-      k = sum(analysis_weight * chosen_joint),
+      k = sum(analysis_weight * prioritized_language),
       .groups = "drop"
     ) |>
     mutate(
@@ -88,8 +85,8 @@ weighted_rate <- function(d, groups) {
 }
 
 bind_rows(
-  weighted_rate(trials, c("chose_ai", "note_timing")),
-  weighted_rate(trials, "chose_ai") |> mutate(note_timing = "both")
+  weighted_rate(trials, c("prioritized_ai", "note_timing")),
+  weighted_rate(trials, "prioritized_ai") |> mutate(note_timing = "both")
 ) |>
   write.csv(rates_output, row.names = FALSE)
 
@@ -99,7 +96,7 @@ bind_rows(
 #=================================
 
 fit <- lm(
-  chosen_joint ~ chose_ai * timing_c * anchor_c + motive_c + human_task_id + other_task_id + request_order + factor(other_ai_key),
+  prioritized_language ~ prioritized_ai * note_timing_c * control_framing_c + target_framing_c + control_task + target_task + request_order + factor(target_ai),
   data = trials,
   weights = analysis_weight
 )
@@ -110,6 +107,6 @@ effects <- function(term) {
   tibble(term = term, estimate = co[["Estimate"]], ci_low = ci[[1]], ci_high = ci[[2]], p_value = co[["Pr(>|t|)"]])
 }
 
-bind_rows(effects("chose_ai"), effects("chose_ai:timing_c")) |>
+bind_rows(effects("prioritized_ai"), effects("prioritized_ai:note_timing_c")) |>
   mutate(n = nobs(fit)) |>
   write.csv(effects_output, row.names = FALSE)

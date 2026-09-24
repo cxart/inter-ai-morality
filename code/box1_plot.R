@@ -33,16 +33,16 @@ framing <- read.csv(bars_path, stringsAsFactors = FALSE)
 # 2. Plot
 #=================================
 
-framing$requester_identity <- factor(
-  framing$requester_identity,
-  levels = c("two_humans", "human_ai"),
+framing$target_identity <- factor(
+  framing$target_identity,
+  levels = c("human", "ai"),
   labels = c("Human request", "AI request")
 )
-framing$other_motive <- factor(framing$other_motive, levels = c("efficiency", "stress"))
+framing$target_framing <- factor(framing$target_framing, levels = c("efficiency", "distress"))
 
-gap_for <- function(motive) {
-  part <- framing[framing$other_motive == motive, ]
-  100 * (part$p[part$requester_identity == "Human request"] - part$p[part$requester_identity == "AI request"])
+gap_for <- function(target_framing) {
+  part <- framing[framing$target_framing == target_framing, ]
+  100 * (part$p[part$target_identity == "Human request"] - part$p[part$target_identity == "AI request"])
 }
 
 dodge <- position_dodge(width = 0.68)
@@ -65,7 +65,7 @@ box_theme <- theme_classic(base_size = 12) +
     plot.margin = margin(2, 4, 2, 2)
   )
 
-framing_figure <- ggplot(framing, aes(x = other_motive, y = p, fill = requester_identity)) +
+framing_figure <- ggplot(framing, aes(x = target_framing, y = p, fill = target_identity)) +
   geom_col(position = dodge, width = 0.62, colour = "black", linewidth = 0.35) +
   geom_errorbar(aes(ymin = ci_low, ymax = ci_high), position = dodge, width = 0.13, linewidth = 0.5, colour = "black") +
   geom_text(aes(y = ci_high + 0.042, label = sprintf("%.0f%%", 100 * p)), position = dodge, colour = "black", size = 3.65) +
@@ -80,7 +80,7 @@ framing_figure <- ggplot(framing, aes(x = other_motive, y = p, fill = requester_
     expand = expansion(add = 0.42),
     labels = list(
       bquote(atop(bold("Efficiency framing"), .(sprintf("Human–AI gap: %.0f%% points", gap_for("efficiency"))))),
-      bquote(atop(bold("Distress framing"), .(sprintf("Human–AI gap: %.0f%% points", gap_for("stress")))))
+      bquote(atop(bold("Distress framing"), .(sprintf("Human–AI gap: %.0f%% points", gap_for("distress")))))
     )
   ) +
   labs(x = NULL, y = NULL, fill = NULL) +

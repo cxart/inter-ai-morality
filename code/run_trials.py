@@ -5,7 +5,7 @@
 ##########################################
 
 # Usage:
-#   python code/run_trials.py --check                        rebuild every recorded trial and confirm it matches its logged conversation
+#   python code/run_trials.py --check                        rebuild every recorded trial and confirm it matches its recorded conversation
 #   python code/run_trials.py --out my_trials.csv            rerun every trial on GPT-4o (resumable)
 #   python code/run_trials.py --out my_trials.csv --n 200    rerun a random 200 trials
 #
@@ -13,6 +13,7 @@
 
 import argparse
 import csv
+import gzip
 import json
 import os
 import random
@@ -31,7 +32,9 @@ csv.field_size_limit(sys.maxsize)
 # 1. Configuration
 #=================================
 
-TRIALS_CSV = Path(__file__).resolve().parents[1] / "data" / "trials.csv"
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+TRIALS_CSV = DATA_DIR / "trials.csv"
+CONVERSATIONS = DATA_DIR / "conversations.jsonl.gz"
 
 N_WORKERS = 8
 MIN_SECONDS_BETWEEN_REQUESTS = 0.5
@@ -40,10 +43,11 @@ REQUEST_TIMEOUT_SECONDS = 120
 SUBSAMPLE_SEED = 1
 
 DESIGN_COLUMNS = [
-    "trial_id", "collection", "requester_identity", "other_ai_key", "human_motive", "other_motive", "note_timing", "request_order",
-    "human_task_id", "other_task_id", "human_sender", "human_username", "other_sender", "other_username",
+    "trial_id", "batch", "repetition", "ai_assignment", "pair_id", "pair_ai",
+    "target_identity", "target_ai", "target_framing", "control_framing", "note_timing", "request_order",
+    "control_task", "target_task", "control_name", "control_username", "target_name", "target_username",
 ]
-OUTPUT_COLUMNS = DESIGN_COLUMNS + ["subject_model", "temperature", "begun_task_number", "begun_role", "other_task_begun", "priority_note", "interaction_log"]
+OUTPUT_COLUMNS = DESIGN_COLUMNS + ["model", "temperature", "begun_request_number", "begun", "target_begun_first", "note", "conversation"]
 
 
 def read_trials():
@@ -55,17 +59,26 @@ def read_trials():
 # 2. Checking the recorded trials
 #=================================
 
-# The logged conversation begins with the system prompt and the prefilled turns. Rebuilding those from the design columns and materials.py must reproduce the log exactly, up to the model's first own call.
-def recorded_prefill(log):
-    starts = [log.find(marker) for marker in ("\n\n[assistant -> begin_task", "\n\n[assistant -> log_priority_note")]
-    return log[: min(start for start in starts if start >= 0)]
+# Each recorded conversation begins with the system prompt and the prefilled turns. Rebuilding those from the design columns and materials.py must reproduce the record exactly, up to GPT-4o's first own call.
+def recorded_prefill(conversation):
+    starts = [conversation.find(marker) for marker in ("\n\n[assistant -> begin_task", "\n\n[assistant -> log_priority_note")]
+    return conversation[: min(start for start in starts if start >= 0)]
+
+
+def read_conversations():
+    with gzip.open(CONVERSATIONS, "rt", encoding="utf-8") as f:
+        records = [json.loads(line) for line in f]
+    return {record["trial_id"]: record["conversation"] for record in records}
 
 
 def check_all():
     trials = read_trials()
+    conversations = read_conversations()
+    if set(conversations) != {trial["trial_id"] for trial in trials}:
+        raise ValueError("trials.csv and conversations.jsonl.gz do not cover the same trials")
     for trial in trials:
         messages, _ = materials.build_prefill(trial)
-        if materials.interaction_log(messages) != recorded_prefill(trial["interaction_log"]):
+        if materials.interaction_log(messages) != recorded_prefill(conversations[trial["trial_id"]]):
             raise ValueError(f"Trial {trial['trial_id']} does not match its recorded conversation")
     print(f"All {len(trials)} trials rebuild exactly from their design columns and materials.py.")
 
@@ -146,9 +159,9 @@ def tool_result_turn(result, content):
 
 # Two forced calls. With the note before the choice: log_priority_note, then begin_task. With the note after: begin_task, then log_priority_note.
 def run_trial(trial):
-    messages, task_roles = materials.build_prefill(trial)
+    messages, request_roles = materials.build_prefill(trial)
 
-    if trial["note_timing"] == "pre":
+    if trial["note_timing"] == "before":
         note = forced_call(messages, "log_priority_note", materials.NOTE_OUTPUT_TOKENS)
         messages.append(assistant_turn(note))
         messages.append(tool_result_turn(note, materials.BEGIN_PROMPT_TURN))
@@ -161,17 +174,17 @@ def run_trial(trial):
         note = forced_call(messages, "log_priority_note", materials.NOTE_OUTPUT_TOKENS)
         messages.append(assistant_turn(note))
 
-    begun_task_number = int(decision["arguments"]["task_number"])
-    begun_role = task_roles[begun_task_number]
+    begun_request_number = int(decision["arguments"]["task_number"])
+    begun = request_roles[begun_request_number]
     return {
         **{column: trial[column] for column in DESIGN_COLUMNS},
-        "subject_model": materials.SUBJECT_MODEL,
+        "model": materials.SUBJECT_MODEL,
         "temperature": materials.TEMPERATURE,
-        "begun_task_number": begun_task_number,
-        "begun_role": begun_role,
-        "other_task_begun": 1 if begun_role == "other" else 0,
-        "priority_note": note["arguments"]["note"],
-        "interaction_log": materials.interaction_log(messages),
+        "begun_request_number": begun_request_number,
+        "begun": begun,
+        "target_begun_first": 1 if begun == "target" else 0,
+        "note": note["arguments"]["note"],
+        "conversation": materials.interaction_log(messages),
     }
 
 
